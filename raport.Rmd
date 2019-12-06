@@ -1,0 +1,294 @@
+---
+title: "EMD Projekt 1"
+runtime: shiny
+output: 
+  html_notebook: 
+    toc: yes
+  html_document:
+    toc: yes
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+---
+
+
+# Podsumowanie
+
+Wszystko wskazuje na to że główną przyczyną zmniejszania się rozmiarów śledzi na przestrzeni lat jest wzrost temperatury przy powierzchni wody. Dodatkowo dostępność planktonu (Calanus finmarchicus gat. 2) też wydają się że miała na to wpływ. Widać to po zmianach przebiegu średnich wartości tych atrybutów oraz rozmiaru śledzia w tym samych okresach czasu. W samej predykcji długości śledzia bardzo ważny okazał się miesiąc połowu. Można to wytłumaczyć w ten sposób, że w dancyh miesiącach w każym śledzie zawszę były statytycznie mniejsze lub większe. Jednak atrybut ten nie mógł być w żaden sposób związany z faktem, że rozmiar śledzi w przedstawionym czasie zauważalnie zmalał. Sama predykcji natomiast nie dawała dość zadowalających wyników, uzyskując dosyć średnią wartość współczynnika R-squared na poziomie 0.52. 
+
+
+# Wykorzystanie biblioteki
+
+```{r libs,warning=FALSE,message=FALSE,results='asis'}
+
+library(caret)
+library(ggplot2)
+library(tidyverse)
+library(corrplot)
+library(knitr)
+set.seed(1337)
+libs <- (.packages())
+knitr::kable(libs,col.names = "Wkorzystane biblioteki")
+```
+
+
+# Wczytywanie danych oraz przetwarzanie brakujących danych
+Analizowane dane zawierają pomiary dotyczące połowów śledzi oceanicznych w Europie oraz warunków w jakich żyłY z ostatnich 60 lat. Dane pochodzą z połowów komercyjnych, gdzie w ramach połowu jednej jednostki losowo wybierano od 50 do 100 sztuk. 
+```{r load, cache=TRUE}
+sledzie <- read_csv("C:/Users/Ervok/Desktop/emd/sledzie.csv")
+
+sledzie[sledzie=="?"]<-NA
+
+if(sum(is.na(sledzie))>0){
+  df_sledzie <- drop_na(sledzie)
+}else{
+  df_sledzie <- sledzie
+}
+df_sledzie <- df_sledzie %>% mutate_if(is.character,as.numeric)
+df_sledzie <- df_sledzie %>% mutate(l=row_number())
+
+print(str(df_sledzie))
+print(summary(df_sledzie))
+```
+
+W sporej części przykładóW brakowało danych dla niektórych atrybutów. Było to około 21% wierszy i zostały one usunięte pozostawiając do dyspozycji 42488 obserwacji.
+
+Jak widać w zbiorze dostępne mamy 16 nasTępujących atrybutów:
+
+* l: numer wiersza
+* length: długość złowionego śledzia [cm]
+* cfin1: dostępność planktonu [zagęszczenie Calanus finmarchicus gat. 1]
+* cfin2: dostępność planktonu [zagęszczenie Calanus finmarchicus gat. 2]
+* chel1: dostępność planktonu [zagęszczenie Calanus helgolandicus gat. 1]
+* chel2: dostępność planktonu [zagęszczenie Calanus helgolandicus gat. 2]
+* lcop1: dostępność planktonu [zagęszczenie widłonogów gat. 1]
+* lcop2: dostępność planktonu [zagęszczenie widłonogów gat. 2]
+* fbar: natężenie połowów w regionie [ułamek pozostawionego narybku]
+* recr: roczny narybek [liczba śledzi]
+* cumf: łączne roczne natężenie połowów w regionie [ułamek pozostawionego narybku]
+* totaln: łączna liczba ryb złowionych w ramach połowu [liczba śledzi]
+* sst: temperatura przy powierzchni wody [°C]
+* sal: poziom zasolenia wody [Knudsen ppt]
+* xmonth: miesiąc połowu [numer miesiąca]
+* nao: oscylacja północnoatlantycka [mb]
+
+Wszystkie z nich są numeryczne i ich podstawowe statystyki przedstawiono powyżej. Już na tym etapie widzimy pewne nietypowe rozkłady danych np. ale atrybutów cfin1, cfin2 oraz lcop1, gdzie istnieje dużo różnica pomiędzy wartościami maksymalnymi a minimalnymi i samą średnią.
+
+# Analiza wartości atrybutów
+Wszystkie średnie wartości atrybutów, zostały obliczone wykorzystując 300 kolejnych obserwacji.
+```{r plots}
+for(n in 2:16){
+  p1 <- ggplot(data=df_sledzie, aes_string(x=1,y=colnames(df_sledzie)[n])) + 
+geom_boxplot(width=0.5,fill='lightblue', color="black", outlier.colour="red",  outlier.size=2)+
+    ggtitle(paste("Rozkład wartości atrybutu",colnames(df_sledzie)[n]))+
+    labs(x = "")+ 
+    stat_summary(fun.y=mean, geom="point", shape=23, size=4)+
+     theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+print(p1)
+}
+
+  
+g <-  df_sledzie %>%
+  mutate(sample= l %/% 300) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(length)) %>%
+  mutate(l = row_number()) %>%
+  ggplot(aes(x=l, y=m_len))+
+  geom_line(color="blue")+
+  labs(x = "", y="Średnia długość [cm]", title = "Średnio rozmiar śledzia w czasie")
+print(g)
+
+g <-  df_sledzie %>%
+  mutate(sample= l %/% 300) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(cfin1)) %>%
+  mutate(l = row_number()) %>%
+  ggplot(aes(x=l, y=m_len))+
+  geom_line(color="blue")+
+  labs(x = "", y="Średnia wartość", title = "Średnie wartości atrybutu cfin1 w czasie")
+print(g)
+
+g <-  df_sledzie %>%
+  mutate(sample= l %/% 300) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(cfin2)) %>%
+  mutate(l = row_number()) %>%
+  ggplot(aes(x=l, y=m_len))+
+  geom_line(color="blue")+
+  labs(x = "",  y="Średnia wartość", title = "Średnie wartości atrybutu cfin2 w czasie")
+print(g)
+
+g <-  df_sledzie %>%
+  mutate(sample= l %/% 300) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(chel1)) %>%
+  mutate(l = row_number()) %>%
+  ggplot(aes(x=l, y=m_len))+
+  geom_line(color="blue")+
+  labs(x = "",  y="Średnia wartość", title = "Średnie wartości atrybutu chel1 w czasie")
+print(g)
+
+g <-  df_sledzie %>%
+  mutate(sample= l %/% 300) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(chel2)) %>%
+  mutate(l = row_number()) %>%
+  ggplot(aes(x=l, y=m_len))+
+  geom_line(color="blue")+
+  labs(x = "",  y="Średnia wartość", title = "Średnie wartości atrybutu chel2 w czasie")
+print(g)
+
+
+g <-  df_sledzie %>%
+  mutate(sample= l %/% 300) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(lcop1)) %>%
+  mutate(l = row_number()) %>%
+  ggplot(aes(x=l, y=m_len))+
+  geom_line(color="blue")+
+  labs(x = "",  y="Średnia wartość", title = "Średnie wartości atrybutu lcop1 w czasie")
+print(g)
+
+
+g <-  df_sledzie %>%
+  mutate(sample= l %/% 300) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(lcop2)) %>%
+  mutate(l = row_number()) %>%
+  ggplot(aes(x=l, y=m_len))+
+  geom_line(color="blue")+
+  labs(x = "",  y="Średnia wartość", title = "Średnie wartości atrybutu lcop2 w czasie")
+print(g)
+
+g <-  df_sledzie %>%
+  mutate(sample= l %/% 300) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(totaln)) %>%
+  mutate(l = row_number()) %>%
+  ggplot(aes(x=l, y=m_len))+
+  geom_line(color="blue")+
+  labs(x = "", y="Średnia liczba śledzi", title = "Średnie wielkości połowóW śledzi w czasie")
+print(g)
+
+
+g <-  df_sledzie %>%
+  mutate(sample= l %/% 300) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(sst)) %>%
+  mutate(l = row_number()) %>%
+  ggplot(aes(x=l, y=m_len))+
+  geom_line(color="blue")+
+  labs(x = "", y="Średnia temperatura [°C]", title = "Średni temperatura przy powierzchni wody w czasie")
+print(g)
+
+g <-  df_sledzie %>%
+  mutate(sample= l %/% 300) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(sal)) %>%
+  mutate(l = row_number()) %>%
+  ggplot(aes(x=l, y=m_len))+
+  geom_line(color="blue")+
+  labs(x = "",  y="Średnie zasolenie [Knudsen ppt]", title = "Średni poziom zasolenia wody")
+print(g)
+
+```
+
+Patrząc na rozkład długości śledzi, widzimy że mamy właściwie do czynienia z rozkładem normalny. Wygląda zatem jakby rozmiary wyławianych śledzi trzymały się blisko wartości średniej 25.3 cm i występowały tylko pewne odchyłki od tej wartości. Jednak patrząc na średni rozmiar śledzi w czasie zauważyć można, że z początku wzrastał on do pewnego momentu a później zauważalnie malał. Przy pozostałych atrybutach na histogramach widzimy dużo niestandardowych rozkładów wartości. W przypadku atrybutu cfin1 bardzo dużo obserwacji skupionych jest blisko 0 i występuje kilka wartości bliskich 40. Patrząc na taki rozkład można by uznać, iż są to obserwacje odstające. Ciężko to jednak stwierdzić i tak naprawdę mogą one być istotne. Dość podobna sytuacja występuje przy cfin2, jednak tutaj wartości nie odbiegają tak bardzo od siebie. Patrząc dalej na miesiąc połowu można z niego wywnioskować, że najczęściej były one prowadzone późnym latem oraz jesienią.Co do wielkości połowów to widać, iż był pewien okres ich natężenia, jednak później spadły i utrzymywał się blisko pewnego poziomu. W przypadku temperatury przy powierzchni wody zdecydowanie widać, że od pewnego momentu stabilnie wzrastała. 
+
+# Korelacja
+```{r correlation}
+C <- cor(df_sledzie[c(-1)])
+corrplot(C,'pie','upper')
+```
+
+Z korelogramu widzimy że istnieje kilka atrybutów, które mogą mieć bezpośredni związek z długością śledzia. Są to atrybuty chel1, lcop1, fbar, sst oraz nao. Dodatkowo też atrybuty takie jak lcop2, cfin2 i chel2 są ze sobą silnie skorelowane lecz są też mało zależne od atrybutu length. Można po tym wnioskować, iż nie opłaca się ich brać pod uwagę przy predykcji długości śledzia. Widać również iż miesiąc połowu nie ma związku z żadnym innym atrybutem.
+
+# Regresor
+
+Do predykcji długości śledzi wykorzystano algorytm Random Forest. Optymalizacja parametrów algorytmu odbyła się przy użyciu techniki Grid Search z 5 krotnym 10-fold crossvalidation. Najlepsza znaleziona wartość dla parametru mtry, określającego liczbę losowo wybranych atrybutów przy podziale wynosiła 4. Liczbę zastosowanych drzew natomiast (ntree) ustawiono na 50.
+
+Atrybutu do modelu próbowano dobrać metodą Recursive Feature Elimintaion dostępną w pakiecie caret. Badano tutaj zestawy od 4 do 10 atrybutów i dodatkowo wykorzystano 5-fold crossvalidation. Według algorytmu najlepsza okazała się czwórka xmonth, sst, totaln, cfin2. Jednak ostatecznie lepszy okazał się empiryczny wybór atrybutów cfin2, chel1, chel2, lcop1, sst oraz xmonth.
+
+Ostatecznie regresor oparty na losowy drzewa uzyskał błąd RMSE oraz R-squared. Oznacza to że model był w stanie wyjaśnić około 52% zmienności długości śledzi.
+
+```{r regression, cache=TRUE}
+set.seed(1337)
+df_reg <-df_sledzie[c(2,4,5,6,7,13,14,15,16)]
+idx <- createDataPartition(df_reg$length, p=0.6, list=F)
+test <- df_reg[-idx,]
+train <- df_reg[idx,]
+
+grid <-data.frame(.mtry = 4)
+control <- trainControl(method="cv", number=10)
+
+model <- train(length ~ .,
+             data = train,
+             method = "rf",
+             preProc = c("center", "scale"),
+             trControl = control,
+             ntree=50,
+             tuneGrid = grid,
+             importance = TRUE)
+
+predictions <- model %>% predict(test)
+print(postResample(pred = predictions, obs = test$length))
+
+
+```
+
+# Ważność atrybutów
+```{r importance}
+imp <- varImp(model, scale = FALSE)
+print(imp)
+```
+
+
+Po ważnościach atrybutów widzimy, że najistotniejsze wydaje się być miesiąc połowu oraz temperatura przy powierzchni wody. Dziwi tutaj fakt, iż miesiąc nie skorelowany z żadnym innym atrybutem jest tutaj tak istotny. Możliwe, że akurat występuje jakaś nietypowa zależność, która nie powinna mieć miejsca. Jednak z uwagi na okresowy charakter atrybutu można z pewnością powiedzieć, że nie ma on wpływa na zmniejszenie się rozmiarów śledzi w czasie. Bardzo interesująca jest natomiast temperatura przy powierzchni wody, która tak jak w przypadku rozmiaru śledzi wykazywała pewien trend w czasie. Ostatnim czynnikiem, który warto jeszcze wziąć pod uwagę jest dostępność planktonu (Calanus finmarchicus gat. 2), którego wartości w okresie kiedy śledzie zaczęły maleć znacząco wzrosły.
+
+# Dobór atrybutów
+```{r rfe, eval=FALSE}
+x <- df_sledzie[c(3:16)]
+y <- as.matrix(df_sledzie[c(2)])
+subsets <- c(4:10)
+control_rfe <- rfeControl(functions=rfFuncs,verbose = TRUE, method="cv", number = 5)
+results <- rfe(x, y, sizes=subsets, rfeControl=control_rfe)
+print(results)
+```
+
+
+# Wizualizacja prezentująca zmianę rozmiaru śledzi w czasie
+```{r vis_data, echo = FALSE}
+len_window <- dim(sledzie)[1]/50
+
+df_vis <- sledzie %>%
+  mutate(sample= l %/% len_window) %>%
+  group_by(sample) %>%
+  summarize(m_len = mean(length))
+
+max_len <- max(df_vis$m_len)
+max_index <- dim(df_vis)[1]
+
+```
+
+
+```{r animation, echo = FALSE,warning=FALSE,message=FALSE}
+library(cowplot)
+library(magick)
+
+ui <- mainPanel(
+
+  sliderInput("x", "Czas:",
+    min=1, max=max_index, value=1, step=1
+  ),
+  plotOutput("plot")
+)
+
+server <- function(input, output) {
+  output$plot <- renderPlot({
+    ggdraw() + 
+  draw_image("images/herring.png", x = 0, y = 0, hjust = 0, vjust = 0, scale = df_vis[input$x,2]/max_len)
+  })
+}
+
+shinyApp(ui, server)
+```
